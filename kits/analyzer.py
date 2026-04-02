@@ -2,11 +2,18 @@
 kits/analyzer.py — LLM 漏洞分析
 
 analyze_cve(cve_data: dict) -> dict
-使用 Claude API 分析 CVE 的影響範圍、攻擊條件、嚴重性等。
+使用 Google Generative AI 分析 CVE 的影響範圍、攻擊條件、嚴重性等。
 """
 
 import json
-import anthropic
+import sys
+import yaml
+import google.generativeai  # noqa: ensure registered in sys.modules
+
+with open("key.yaml") as f:
+    _keys = yaml.safe_load(f)
+
+sys.modules["google.generativeai"].configure(api_key=_keys["GOOGLE_API_KEY"])
 
 REQUIRED_INPUT_KEYS = {"description", "cvss_score"}
 
@@ -23,17 +30,19 @@ SYSTEM_PROMPT = """\
 """
 
 
-def call_claude(prompt: str) -> dict:
-    """呼叫 Claude API，回傳解析後的 dict。"""
-    client = anthropic.Anthropic()
-    message = client.messages.create(
-        model="claude-opus-4-6",
-        max_tokens=1024,
-        messages=[{"role": "user", "content": prompt}],
-        system=SYSTEM_PROMPT,
+def call_llm(prompt: str, system_prompt: str) -> dict:
+    """呼叫 Google Generative AI，回傳解析後的 dict。"""
+    import re
+    genai = sys.modules["google.generativeai"]
+    model = genai.GenerativeModel(
+        model_name="gemini-2.5-flash",
+        system_instruction=system_prompt,
     )
-    content = message.content[0].text
-    return json.loads(content)
+    response = model.generate_content(prompt)
+    text = response.text.strip()
+    text = re.sub(r"^```(?:json)?\s*", "", text)
+    text = re.sub(r"\s*```$", "", text)
+    return json.loads(text)
 
 
 def analyze_cve(cve_data: dict) -> dict:
@@ -59,7 +68,7 @@ CVSS Vector: {cve_data.get('cvss_vector', 'N/A')}
 
 請分析此漏洞並以指定 JSON 格式回覆。
 """
-    result = call_claude(prompt)
+    result = call_llm(prompt, SYSTEM_PROMPT)
     if result is None:
-        raise ValueError("call_claude returned None")
+        raise ValueError("call_llm returned None")
     return result

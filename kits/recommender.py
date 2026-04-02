@@ -2,11 +2,18 @@
 kits/recommender.py — 修復建議生成
 
 generate_recommendation(cve_data: dict, analysis: dict) -> dict
-使用 Claude API 根據 CVE 資料與分析結果生成修復建議。
+使用 Google Generative AI 根據 CVE 資料與分析結果生成修復建議。
 """
 
 import json
-import anthropic
+import sys
+import yaml
+import google.generativeai  # noqa: ensure registered in sys.modules
+
+with open("key.yaml") as f:
+    _keys = yaml.safe_load(f)
+
+sys.modules["google.generativeai"].configure(api_key=_keys["GOOGLE_API_KEY"])
 
 SYSTEM_PROMPT = """\
 你是一位資安修復建議專家。請根據提供的 CVE 資訊與分析結果，以 JSON 格式回覆以下欄位：
@@ -19,17 +26,19 @@ SYSTEM_PROMPT = """\
 """
 
 
-def call_claude(prompt: str) -> dict:
-    """呼叫 Claude API，回傳解析後的 dict。"""
-    client = anthropic.Anthropic()
-    message = client.messages.create(
-        model="claude-opus-4-6",
-        max_tokens=1024,
-        messages=[{"role": "user", "content": prompt}],
-        system=SYSTEM_PROMPT,
+def call_llm(prompt: str, system_prompt: str) -> dict:
+    """呼叫 Google Generative AI，回傳解析後的 dict。"""
+    import re
+    genai = sys.modules["google.generativeai"]
+    model = genai.GenerativeModel(
+        model_name="gemini-2.5-flash",
+        system_instruction=system_prompt,
     )
-    content = message.content[0].text
-    return json.loads(content)
+    response = model.generate_content(prompt)
+    text = response.text.strip()
+    text = re.sub(r"^```(?:json)?\s*", "", text)
+    text = re.sub(r"\s*```$", "", text)
+    return json.loads(text)
 
 
 def generate_recommendation(cve_data: dict, analysis: dict) -> dict:
@@ -60,7 +69,7 @@ CVSS Score: {cve_data.get('cvss_score', 'N/A')}
 
 請生成修復建議並以指定 JSON 格式回覆。
 """
-    result = call_claude(prompt)
+    result = call_llm(prompt, SYSTEM_PROMPT)
     if result is None:
-        raise ValueError("call_claude returned None")
+        raise ValueError("call_llm returned None")
     return result
