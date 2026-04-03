@@ -32,6 +32,15 @@ def fetch_from_nvd(cve_id: str):
         resp = requests.get(NVD_API_URL, params={"cveId": cve_id}, timeout=10)
         resp.raise_for_status()
         data = resp.json()
+        # [ 
+        #   'resultsPerPage', 漏洞資料本體	
+        #   'startIndex', 這次回傳幾筆	
+        #   'totalResults', 從第幾筆開始	
+        #   'format', 總共有幾筆	
+        #   'version', 回傳格式名稱	
+        #   'timestamp', API 版本號	
+        #   'vulnerabilities' 查詢時間	
+        # ]
         vulnerabilities = data.get("vulnerabilities", [])
         if not vulnerabilities:
             return None

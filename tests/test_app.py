@@ -1,16 +1,19 @@
 """
 測試 app.py — analyze(cve_id: str) -> dict
+           — demo (gr.Blocks) UI 結構
 
 測試範圍：
 - 正常輸入：合法 CVE ID → 回傳含必要欄位的 dict
 - 錯誤輸入：非法格式 → {"error": "..."}
 - 錯誤輸入：空字串 → {"error": "..."}
 - 邊界情境：generate_report 拋出例外 → {"error": "..."}
+- UI 結構：demo 包含 gr.Markdown、gr.Textbox、gr.JSON
 """
 
+import gradio as gr
 import pytest
 from unittest.mock import patch, MagicMock
-from app import analyze
+from app import analyze, demo
 
 
 # ── 共用測試資料 ──────────────────────────────────────────────────────────────
@@ -134,3 +137,77 @@ class TestAnalyzeBoundary:
         result = analyze("   ")
         assert "error" in result
         mock_report.assert_not_called()
+
+
+# ── UI 結構測試 ───────────────────────────────────────────────────────────────
+
+class TestAppUIStructure:
+    def _get_all_components(self):
+        """取得 demo.blocks 中所有 component 物件。"""
+        return list(demo.blocks.values())
+
+    def test_demo_is_gradio_blocks(self):
+        """demo 應為 gr.Blocks 實例。"""
+        assert isinstance(demo, gr.Blocks)
+
+    def test_demo_contains_markdown_component(self):
+        """demo 應包含至少一個 gr.Markdown 元件。"""
+        components = self._get_all_components()
+        markdown_components = [c for c in components if isinstance(c, gr.Markdown)]
+        assert len(markdown_components) >= 1, "demo 中找不到 gr.Markdown 元件"
+
+    def test_demo_contains_textbox_component(self):
+        """demo 應包含 gr.Textbox 元件。"""
+        components = self._get_all_components()
+        textboxes = [c for c in components if isinstance(c, gr.Textbox)]
+        assert len(textboxes) >= 1, "demo 中找不到 gr.Textbox 元件"
+
+    def test_demo_contains_json_component(self):
+        """demo 應包含 gr.JSON 元件。"""
+        components = self._get_all_components()
+        json_components = [c for c in components if isinstance(c, gr.JSON)]
+        assert len(json_components) >= 1, "demo 中找不到 gr.JSON 元件"
+
+    def test_markdown_contains_project_title(self):
+        """Markdown 元件應包含標題「CVE 自動分析系統」。"""
+        components = self._get_all_components()
+        markdown_components = [c for c in components if isinstance(c, gr.Markdown)]
+        all_text = " ".join(c.value for c in markdown_components if c.value)
+        assert "CVE 自動分析系統" in all_text
+
+    def test_markdown_contains_usage_flow(self):
+        """Markdown 元件應包含「使用流程」說明。"""
+        components = self._get_all_components()
+        markdown_components = [c for c in components if isinstance(c, gr.Markdown)]
+        all_text = " ".join(c.value for c in markdown_components if c.value)
+        assert "使用流程" in all_text
+
+    def test_markdown_contains_three_steps(self):
+        """Markdown 元件應包含三個步驟說明（1. 2. 3.）。"""
+        components = self._get_all_components()
+        markdown_components = [c for c in components if isinstance(c, gr.Markdown)]
+        all_text = " ".join(c.value for c in markdown_components if c.value)
+        assert "1." in all_text
+        assert "2." in all_text
+        assert "3." in all_text
+
+    def test_markdown_mentions_project_purpose(self):
+        """Markdown 元件應包含「專案用途」說明。"""
+        components = self._get_all_components()
+        markdown_components = [c for c in components if isinstance(c, gr.Markdown)]
+        all_text = " ".join(c.value for c in markdown_components if c.value)
+        assert "專案用途" in all_text
+
+    def test_textbox_label_is_cve_id(self):
+        """Textbox 的 label 應為 'CVE ID'。"""
+        components = self._get_all_components()
+        textboxes = [c for c in components if isinstance(c, gr.Textbox)]
+        labels = [c.label for c in textboxes]
+        assert "CVE ID" in labels
+
+    def test_textbox_placeholder_contains_example(self):
+        """Textbox 的 placeholder 應包含 CVE ID 範例。"""
+        components = self._get_all_components()
+        textboxes = [c for c in components if isinstance(c, gr.Textbox)]
+        placeholders = [c.placeholder for c in textboxes if c.placeholder]
+        assert any("CVE-" in p for p in placeholders)

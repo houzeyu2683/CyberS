@@ -17,6 +17,18 @@ def analyze(cve_id: str):
 
 
 with gr.Blocks() as demo:
+    gr.Markdown("""
+## CVE 自動分析系統
+
+**專案用途**
+輸入 CVE ID，系統自動從 NVD、OSV.dev、GitHub Advisory 擷取漏洞資訊，
+透過 AI 分析影響範圍與攻擊向量，並生成具體的修復建議。
+
+**使用流程**
+1. 在下方輸入框填入 CVE ID（例：CVE-2021-44228）
+2. 點擊「分析」按鈕
+3. 查看右側 JSON 報告，包含漏洞摘要、影響分析、修復建議與風險評級
+""")
     inp = gr.Textbox(label="CVE ID", placeholder="CVE-2021-44228")
     btn = gr.Button("分析")
     out = gr.JSON()
