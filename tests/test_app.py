@@ -1,13 +1,14 @@
 """
-測試 app.py — analyze(cve_id: str) -> dict
+測試 app.py — analyze(cve_id, check_poc, check_kev) -> dict
            — demo (gr.Blocks) UI 結構
 
 測試範圍：
 - 正常輸入：合法 CVE ID → 回傳含必要欄位的 dict
+- check_poc / check_kev 參數傳遞至 generate_report
 - 錯誤輸入：非法格式 → {"error": "..."}
 - 錯誤輸入：空字串 → {"error": "..."}
 - 邊界情境：generate_report 拋出例外 → {"error": "..."}
-- UI 結構：demo 包含 gr.Markdown、gr.Textbox、gr.JSON
+- UI 結構：demo 包含 gr.Markdown、gr.Textbox、gr.Checkbox x2、gr.JSON
 """
 
 import gradio as gr
@@ -72,40 +73,65 @@ class TestAnalyzeNormal:
     @patch("app.generate_report")
     def test_generate_report_called_with_cve_id(self, mock_report):
         mock_report.return_value = MOCK_REPORT
-        analyze("CVE-2021-44228")
-        mock_report.assert_called_once_with("CVE-2021-44228")
+        analyze("CVE-2021-44228", False, False)
+        mock_report.assert_called_once_with("CVE-2021-44228", check_poc=False, check_kev=False)
+
+    @patch("app.generate_report")
+    def test_passes_check_poc_true_to_report(self, mock_report):
+        """check_poc=True 應傳遞給 generate_report。"""
+        mock_report.return_value = {**MOCK_REPORT, "threat_intel": {"has_poc": True, "poc_count": 3}}
+        result = analyze("CVE-2021-44228", True, False)
+        mock_report.assert_called_once_with("CVE-2021-44228", check_poc=True, check_kev=False)
+        assert isinstance(result, dict)
+
+    @patch("app.generate_report")
+    def test_passes_check_kev_true_to_report(self, mock_report):
+        """check_kev=True 應傳遞給 generate_report。"""
+        mock_report.return_value = {**MOCK_REPORT, "threat_intel": {"in_the_wild": True}}
+        result = analyze("CVE-2021-44228", False, True)
+        mock_report.assert_called_once_with("CVE-2021-44228", check_poc=False, check_kev=True)
+        assert isinstance(result, dict)
+
+    @patch("app.generate_report")
+    def test_passes_both_true_to_report(self, mock_report):
+        """check_poc=True, check_kev=True 兩者都傳遞給 generate_report。"""
+        threat = {"has_poc": True, "poc_count": 3, "in_the_wild": True}
+        mock_report.return_value = {**MOCK_REPORT, "threat_intel": threat}
+        result = analyze("CVE-2021-44228", True, True)
+        mock_report.assert_called_once_with("CVE-2021-44228", check_poc=True, check_kev=True)
+        assert "threat_intel" in result
 
 
 # ── 錯誤輸入 ──────────────────────────────────────────────────────────────────
 
 class TestAnalyzeInvalidInput:
     def test_invalid_format_returns_error_dict(self):
-        result = analyze("abc")
+        result = analyze("abc", False, False)
         assert isinstance(result, dict)
         assert "error" in result
         assert isinstance(result["error"], str)
         assert len(result["error"]) > 0
 
     def test_empty_string_returns_error_dict(self):
-        result = analyze("")
+        result = analyze("", False, False)
         assert isinstance(result, dict)
         assert "error" in result
         assert isinstance(result["error"], str)
 
     def test_none_input_returns_error_dict(self):
-        result = analyze(None)
+        result = analyze(None, False, False)
         assert isinstance(result, dict)
         assert "error" in result
 
     def test_numeric_input_returns_error_dict(self):
-        result = analyze("12345")
+        result = analyze("12345", False, False)
         assert isinstance(result, dict)
         assert "error" in result
 
     def test_invalid_format_no_exception_propagated(self):
         """analyze 不應拋出例外，所有錯誤都應包在 {"error": ...} 中。"""
         try:
-            result = analyze("not-a-cve")
+            result = analyze("not-a-cve", False, False)
             assert "error" in result
         except Exception as e:
             pytest.fail(f"analyze() raised an exception: {e}")
@@ -117,24 +143,24 @@ class TestAnalyzeBoundary:
     @patch("app.generate_report", side_effect=Exception("fetch failed"))
     def test_generate_report_exception_returns_error_dict(self, mock_report):
         """generate_report 拋出例外時，應回傳 {"error": ...}。"""
-        result = analyze("CVE-2021-44228")
+        result = analyze("CVE-2021-44228", False, False)
         assert isinstance(result, dict)
         assert "error" in result
         assert "fetch failed" in result["error"]
 
     @patch("app.generate_report", side_effect=ValueError("invalid cve"))
     def test_value_error_from_report_returns_error_dict(self, mock_report):
-        result = analyze("CVE-2021-44228")
+        result = analyze("CVE-2021-44228", False, False)
         assert "error" in result
 
     @patch("app.generate_report", side_effect=KeyError("missing key"))
     def test_key_error_from_report_returns_error_dict(self, mock_report):
-        result = analyze("CVE-2021-44228")
+        result = analyze("CVE-2021-44228", False, False)
         assert "error" in result
 
     @patch("app.generate_report")
     def test_whitespace_only_input_returns_error_dict(self, mock_report):
-        result = analyze("   ")
+        result = analyze("   ", False, False)
         assert "error" in result
         mock_report.assert_not_called()
 
@@ -211,3 +237,32 @@ class TestAppUIStructure:
         textboxes = [c for c in components if isinstance(c, gr.Textbox)]
         placeholders = [c.placeholder for c in textboxes if c.placeholder]
         assert any("CVE-" in p for p in placeholders)
+
+    def test_demo_contains_two_checkbox_components(self):
+        """demo 應包含兩個 gr.Checkbox 元件（PoC + KEV）。"""
+        components = self._get_all_components()
+        checkboxes = [c for c in components if isinstance(c, gr.Checkbox)]
+        assert len(checkboxes) >= 2, f"demo 應有 2 個 Checkbox，實際有 {len(checkboxes)} 個"
+
+    def test_checkbox_poc_label(self):
+        """其中一個 Checkbox 應與 PoC 偵測相關。"""
+        components = self._get_all_components()
+        checkboxes = [c for c in components if isinstance(c, gr.Checkbox)]
+        labels = [c.label for c in checkboxes if c.label]
+        assert any("PoC" in label for label in labels), f"找不到 PoC Checkbox，labels={labels}"
+
+    def test_checkbox_kev_label(self):
+        """其中一個 Checkbox 應與 KEV / In the Wild 相關。"""
+        components = self._get_all_components()
+        checkboxes = [c for c in components if isinstance(c, gr.Checkbox)]
+        labels = [c.label for c in checkboxes if c.label]
+        assert any(
+            "KEV" in label or "Wild" in label or "wild" in label for label in labels
+        ), f"找不到 KEV Checkbox，labels={labels}"
+
+    def test_checkboxes_default_to_false(self):
+        """兩個 Checkbox 預設值應為 False。"""
+        components = self._get_all_components()
+        checkboxes = [c for c in components if isinstance(c, gr.Checkbox)]
+        for cb in checkboxes:
+            assert cb.value is False, f"Checkbox '{cb.label}' 預設值應為 False，實際為 {cb.value}"

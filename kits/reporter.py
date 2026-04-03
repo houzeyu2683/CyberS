@@ -11,6 +11,7 @@ from datetime import datetime
 from kits.fetcher import fetch_cve
 from kits.analyzer import analyze_cve
 from kits.recommender import generate_recommendation
+from kits.threat import check_poc as check_poc_fn, check_kev as check_kev_fn
 
 CVE_PATTERN = re.compile(r"^CVE-\d{4}-\d{4,}$", re.IGNORECASE)
 
@@ -33,7 +34,7 @@ def _validate_cve_id(cve_id):
         raise ValueError(f"Invalid CVE ID format: {cve_id!r}")
 
 
-def generate_report(cve_id: str) -> dict:
+def generate_report(cve_id: str, check_poc: bool = False, check_kev: bool = False) -> dict:
     """
     生成完整 CVE 分析報告。
     """
@@ -52,7 +53,13 @@ def generate_report(cve_id: str) -> dict:
         else f"{cve_id} — {analysis.get('impact_summary', '')}"
     )
 
-    return {
+    threat_intel = {}
+    if check_poc:
+        threat_intel.update(check_poc_fn(cve_id))
+    if check_kev:
+        threat_intel.update(check_kev_fn(cve_id))
+
+    report = {
         "cve_id": cve_id,
         "summary": summary,
         "impact": analysis,
@@ -60,3 +67,6 @@ def generate_report(cve_id: str) -> dict:
         "risk_rating": risk_rating,
         "generated_at": datetime.now().isoformat(timespec="seconds"),
     }
+    if threat_intel:
+        report["threat_intel"] = threat_intel
+    return report

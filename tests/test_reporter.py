@@ -1,8 +1,9 @@
 """
-測試 kits/reporter.py — generate_report(cve_id: str) -> dict
+測試 kits/reporter.py — generate_report(cve_id, check_poc, check_kev) -> dict
 
 測試範圍：
 - 單元測試：mock fetcher/analyzer/recommender，驗證報告組裝邏輯
+- threat_intel 參數：check_poc/check_kev 各種組合
 - 整合測試：使用真實 CVE ID（CVE-2021-44228），標記為需要網路
 - 邊界情境：fetch_cve 拋出例外、analyzer/recommender 回傳不完整資料
 - 錯誤輸入：無效 CVE ID、None、非字串
@@ -171,6 +172,74 @@ class TestGenerateReportInvalidInput:
     def test_raises_for_non_string_input(self):
         with pytest.raises((ValueError, TypeError)):
             generate_report(12345)
+
+
+# ── threat_intel 參數測試 ─────────────────────────────────────────────────────
+
+MOCK_POC_RESULT = {"has_poc": True, "poc_count": 12}
+MOCK_KEV_RESULT = {"in_the_wild": True}
+
+
+class TestGenerateReportThreatIntel:
+    @patch("kits.reporter.generate_recommendation", return_value=MOCK_RECOMMENDATION)
+    @patch("kits.reporter.analyze_cve", return_value=MOCK_ANALYSIS)
+    @patch("kits.reporter.fetch_cve", return_value=MOCK_CVE_DATA)
+    def test_no_threat_intel_field_when_both_false(
+        self, mock_fetch, mock_analyze, mock_recommend
+    ):
+        """check_poc=False, check_kev=False → 報告不含 threat_intel 欄位。"""
+        result = generate_report(VALID_CVE_ID, check_poc=False, check_kev=False)
+        assert "threat_intel" not in result
+
+    @patch("kits.reporter.check_poc_fn", return_value=MOCK_POC_RESULT)
+    @patch("kits.reporter.generate_recommendation", return_value=MOCK_RECOMMENDATION)
+    @patch("kits.reporter.analyze_cve", return_value=MOCK_ANALYSIS)
+    @patch("kits.reporter.fetch_cve", return_value=MOCK_CVE_DATA)
+    def test_threat_intel_has_poc_when_check_poc_true(
+        self, mock_fetch, mock_analyze, mock_recommend, mock_poc
+    ):
+        """check_poc=True → 報告含 threat_intel.has_poc，無 in_the_wild。"""
+        result = generate_report(VALID_CVE_ID, check_poc=True, check_kev=False)
+        assert "threat_intel" in result
+        assert "has_poc" in result["threat_intel"]
+        assert "in_the_wild" not in result["threat_intel"]
+
+    @patch("kits.reporter.check_kev_fn", return_value=MOCK_KEV_RESULT)
+    @patch("kits.reporter.generate_recommendation", return_value=MOCK_RECOMMENDATION)
+    @patch("kits.reporter.analyze_cve", return_value=MOCK_ANALYSIS)
+    @patch("kits.reporter.fetch_cve", return_value=MOCK_CVE_DATA)
+    def test_threat_intel_has_kev_when_check_kev_true(
+        self, mock_fetch, mock_analyze, mock_recommend, mock_kev
+    ):
+        """check_kev=True → 報告含 threat_intel.in_the_wild，無 has_poc。"""
+        result = generate_report(VALID_CVE_ID, check_poc=False, check_kev=True)
+        assert "threat_intel" in result
+        assert "in_the_wild" in result["threat_intel"]
+        assert "has_poc" not in result["threat_intel"]
+
+    @patch("kits.reporter.check_kev_fn", return_value=MOCK_KEV_RESULT)
+    @patch("kits.reporter.check_poc_fn", return_value=MOCK_POC_RESULT)
+    @patch("kits.reporter.generate_recommendation", return_value=MOCK_RECOMMENDATION)
+    @patch("kits.reporter.analyze_cve", return_value=MOCK_ANALYSIS)
+    @patch("kits.reporter.fetch_cve", return_value=MOCK_CVE_DATA)
+    def test_threat_intel_complete_when_both_true(
+        self, mock_fetch, mock_analyze, mock_recommend, mock_poc, mock_kev
+    ):
+        """check_poc=True, check_kev=True → 報告含完整 threat_intel。"""
+        result = generate_report(VALID_CVE_ID, check_poc=True, check_kev=True)
+        assert "threat_intel" in result
+        assert "has_poc" in result["threat_intel"]
+        assert "in_the_wild" in result["threat_intel"]
+
+    @patch("kits.reporter.generate_recommendation", return_value=MOCK_RECOMMENDATION)
+    @patch("kits.reporter.analyze_cve", return_value=MOCK_ANALYSIS)
+    @patch("kits.reporter.fetch_cve", return_value=MOCK_CVE_DATA)
+    def test_default_params_no_threat_intel(
+        self, mock_fetch, mock_analyze, mock_recommend
+    ):
+        """預設不帶參數 → 不含 threat_intel（向下相容）。"""
+        result = generate_report(VALID_CVE_ID)
+        assert "threat_intel" not in result
 
 
 # ── 整合測試（需要網路）──────────────────────────────────────────────────────
