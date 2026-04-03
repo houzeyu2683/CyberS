@@ -35,3 +35,23 @@ def check_kev(cve_id: str) -> dict:
     vulns = resp.json().get("vulnerabilities", [])
     found = any(v.get("cveID", "").upper() == cve_id.upper() for v in vulns)
     return {"in_the_wild": found}
+
+
+def check_epss(cve_id: str) -> dict:
+    """查詢 FIRST EPSS API，取得 CVE 未來 30 天被利用的機率分數。"""
+    try:
+        url = f"https://api.first.org/data/1.0/epss?cve={cve_id}"
+        resp = requests.get(url)
+        data = resp.json().get("data", [])
+        if not data:
+            return {"epss_score": None, "epss_percentile": None, "epss_high_risk": False, "epss_note": "無資料"}
+        item = data[0]
+        score = float(item["epss"])
+        percentile = float(item["percentile"])
+        return {
+            "epss_score": score,
+            "epss_percentile": percentile,
+            "epss_high_risk": score > 0.1,
+        }
+    except Exception:
+        return {"epss_score": None, "epss_percentile": None, "epss_high_risk": False, "epss_note": "無資料"}

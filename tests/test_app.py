@@ -1,20 +1,23 @@
 """
-測試 app.py — analyze(cve_id, check_poc, check_kev) -> dict
+測試 app.py — analyze(cve_id, check_poc, check_kev, check_epss) -> dict
+           — to_markdown(report_json) -> (str, gr.update)
            — demo (gr.Blocks) UI 結構
 
 測試範圍：
 - 正常輸入：合法 CVE ID → 回傳含必要欄位的 dict
-- check_poc / check_kev 參數傳遞至 generate_report
+- check_poc / check_kev / check_epss 參數傳遞至 generate_report
 - 錯誤輸入：非法格式 → {"error": "..."}
 - 錯誤輸入：空字串 → {"error": "..."}
 - 邊界情境：generate_report 拋出例外 → {"error": "..."}
-- UI 結構：demo 包含 gr.Markdown、gr.Textbox、gr.Checkbox x2、gr.JSON
+- to_markdown：有效 report → md 字串含標題，dl_btn visible=True
+- to_markdown：None 或含 error → 提示文字，dl_btn visible=False
+- UI 結構：demo 包含 gr.Markdown、gr.Textbox、gr.Checkbox x3、gr.JSON
 """
 
 import gradio as gr
 import pytest
 from unittest.mock import patch, MagicMock
-from app import analyze, demo
+from app import analyze, to_markdown, demo
 
 
 # ── 共用測試資料 ──────────────────────────────────────────────────────────────
@@ -73,23 +76,29 @@ class TestAnalyzeNormal:
     @patch("app.generate_report")
     def test_generate_report_called_with_cve_id(self, mock_report):
         mock_report.return_value = MOCK_REPORT
-        analyze("CVE-2021-44228", False, False)
-        mock_report.assert_called_once_with("CVE-2021-44228", check_poc=False, check_kev=False)
+        analyze("CVE-2021-44228", False, False, False)
+        mock_report.assert_called_once_with(
+            "CVE-2021-44228", check_poc=False, check_kev=False, check_epss=False
+        )
 
     @patch("app.generate_report")
     def test_passes_check_poc_true_to_report(self, mock_report):
         """check_poc=True 應傳遞給 generate_report。"""
         mock_report.return_value = {**MOCK_REPORT, "threat_intel": {"has_poc": True, "poc_count": 3}}
-        result = analyze("CVE-2021-44228", True, False)
-        mock_report.assert_called_once_with("CVE-2021-44228", check_poc=True, check_kev=False)
+        result = analyze("CVE-2021-44228", True, False, False)
+        mock_report.assert_called_once_with(
+            "CVE-2021-44228", check_poc=True, check_kev=False, check_epss=False
+        )
         assert isinstance(result, dict)
 
     @patch("app.generate_report")
     def test_passes_check_kev_true_to_report(self, mock_report):
         """check_kev=True 應傳遞給 generate_report。"""
         mock_report.return_value = {**MOCK_REPORT, "threat_intel": {"in_the_wild": True}}
-        result = analyze("CVE-2021-44228", False, True)
-        mock_report.assert_called_once_with("CVE-2021-44228", check_poc=False, check_kev=True)
+        result = analyze("CVE-2021-44228", False, True, False)
+        mock_report.assert_called_once_with(
+            "CVE-2021-44228", check_poc=False, check_kev=True, check_epss=False
+        )
         assert isinstance(result, dict)
 
     @patch("app.generate_report")
@@ -97,8 +106,10 @@ class TestAnalyzeNormal:
         """check_poc=True, check_kev=True 兩者都傳遞給 generate_report。"""
         threat = {"has_poc": True, "poc_count": 3, "in_the_wild": True}
         mock_report.return_value = {**MOCK_REPORT, "threat_intel": threat}
-        result = analyze("CVE-2021-44228", True, True)
-        mock_report.assert_called_once_with("CVE-2021-44228", check_poc=True, check_kev=True)
+        result = analyze("CVE-2021-44228", True, True, False)
+        mock_report.assert_called_once_with(
+            "CVE-2021-44228", check_poc=True, check_kev=True, check_epss=False
+        )
         assert "threat_intel" in result
 
 
@@ -261,8 +272,101 @@ class TestAppUIStructure:
         ), f"找不到 KEV Checkbox，labels={labels}"
 
     def test_checkboxes_default_to_false(self):
-        """兩個 Checkbox 預設值應為 False。"""
+        """所有 Checkbox 預設值應為 False。"""
         components = self._get_all_components()
         checkboxes = [c for c in components if isinstance(c, gr.Checkbox)]
         for cb in checkboxes:
             assert cb.value is False, f"Checkbox '{cb.label}' 預設值應為 False，實際為 {cb.value}"
+
+    def test_demo_contains_three_checkbox_components(self):
+        """demo 應包含三個 gr.Checkbox 元件（PoC + KEV + EPSS）。"""
+        components = self._get_all_components()
+        checkboxes = [c for c in components if isinstance(c, gr.Checkbox)]
+        assert len(checkboxes) >= 3, f"demo 應有 3 個 Checkbox，實際有 {len(checkboxes)} 個"
+
+    def test_checkbox_epss_label(self):
+        """其中一個 Checkbox 應與 EPSS 偵測相關。"""
+        components = self._get_all_components()
+        checkboxes = [c for c in components if isinstance(c, gr.Checkbox)]
+        labels = [c.label for c in checkboxes if c.label]
+        assert any("EPSS" in label for label in labels), f"找不到 EPSS Checkbox，labels={labels}"
+
+    def test_demo_contains_download_button(self):
+        """demo 應包含 gr.DownloadButton 元件。"""
+        components = self._get_all_components()
+        download_btns = [c for c in components if isinstance(c, gr.DownloadButton)]
+        assert len(download_btns) >= 1, "demo 中找不到 gr.DownloadButton 元件"
+
+    def test_demo_contains_markdown_report_button(self):
+        """demo 應包含「產生 Markdown 報告」按鈕。"""
+        components = self._get_all_components()
+        buttons = [c for c in components if isinstance(c, gr.Button)]
+        labels = [c.value for c in buttons if c.value]
+        assert any("Markdown" in label for label in labels), f"找不到 Markdown 報告按鈕，labels={labels}"
+
+
+# ── EPSS 參數傳遞測試 ─────────────────────────────────────────────────────────
+
+MOCK_REPORT_WITH_EPSS_WARNING = {
+    **MOCK_REPORT,
+    "threat_intel": {
+        "epss_score": 0.15,
+        "epss_percentile": 0.95,
+        "epss_high_risk": True,
+    },
+    "epss_warning": "高風險：EPSS 分數 0.1500，超過門檻 0.1，建議優先處理",
+}
+
+
+class TestAnalyzeWithEpss:
+    @patch("app.generate_report")
+    def test_analyze_with_epss_true(self, mock_report):
+        """check_epss=True, mock 高風險 → 回傳含 epss_warning"""
+        mock_report.return_value = MOCK_REPORT_WITH_EPSS_WARNING
+        result = analyze("CVE-2021-44228", False, False, True)
+        mock_report.assert_called_once_with(
+            "CVE-2021-44228", check_poc=False, check_kev=False, check_epss=True
+        )
+        assert "epss_warning" in result
+
+    @patch("app.generate_report")
+    def test_analyze_with_epss_false(self, mock_report):
+        """check_epss=False → 回傳不含 epss 欄位"""
+        mock_report.return_value = MOCK_REPORT
+        result = analyze("CVE-2021-44228", False, False, False)
+        mock_report.assert_called_once_with(
+            "CVE-2021-44228", check_poc=False, check_kev=False, check_epss=False
+        )
+        assert "epss_warning" not in result
+        if "threat_intel" in result:
+            assert "epss_score" not in result["threat_intel"]
+
+
+# ── to_markdown 測試 ──────────────────────────────────────────────────────────
+
+class TestToMarkdown:
+    def test_to_markdown_valid_report(self):
+        """傳入有效 report dict → 回傳 md 字串含標題，dl_btn visible=True"""
+        md_text, dl_update = to_markdown(MOCK_REPORT)
+        assert isinstance(md_text, str)
+        assert "# CVE 漏洞分析報告" in md_text
+        assert dl_update.get("visible") is True
+
+    def test_to_markdown_no_report_none(self):
+        """傳入 None → 回傳提示文字，dl_btn visible=False"""
+        md_text, dl_update = to_markdown(None)
+        assert isinstance(md_text, str)
+        assert "尚無報告" in md_text or "請先執行分析" in md_text
+        assert dl_update.get("visible") is False
+
+    def test_to_markdown_error_report(self):
+        """傳入含 error 的 dict → 回傳提示文字，dl_btn visible=False"""
+        md_text, dl_update = to_markdown({"error": "fetch failed"})
+        assert isinstance(md_text, str)
+        assert dl_update.get("visible") is False
+
+    def test_to_markdown_creates_file(self, tmp_path):
+        """呼叫後應在 /tmp/cve_report.md 建立檔案"""
+        import os
+        to_markdown(MOCK_REPORT)
+        assert os.path.exists("/tmp/cve_report.md")

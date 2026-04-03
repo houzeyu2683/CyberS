@@ -1,9 +1,12 @@
 """
-測試 kits/reporter.py — generate_report(cve_id, check_poc, check_kev) -> dict
+測試 kits/reporter.py — generate_report(cve_id, check_poc, check_kev, check_epss) -> dict
+                       report_to_markdown(report: dict) -> str
 
 測試範圍：
 - 單元測試：mock fetcher/analyzer/recommender，驗證報告組裝邏輯
-- threat_intel 參數：check_poc/check_kev 各種組合
+- threat_intel 參數：check_poc/check_kev/check_epss 各種組合
+- EPSS 整合邏輯：低風險、高風險、查無資料
+- Markdown 輸出：基本結構、含威脅情報、無威脅情報、epss_warning
 - 整合測試：使用真實 CVE ID（CVE-2021-44228），標記為需要網路
 - 邊界情境：fetch_cve 拋出例外、analyzer/recommender 回傳不完整資料
 - 錯誤輸入：無效 CVE ID、None、非字串
@@ -12,7 +15,7 @@
 import pytest
 from unittest.mock import patch, MagicMock
 from datetime import datetime
-from kits.reporter import generate_report
+from kits.reporter import generate_report, report_to_markdown
 
 
 # ── 共用測試資料 ──────────────────────────────────────────────────────────────
@@ -240,6 +243,157 @@ class TestGenerateReportThreatIntel:
         """預設不帶參數 → 不含 threat_intel（向下相容）。"""
         result = generate_report(VALID_CVE_ID)
         assert "threat_intel" not in result
+
+
+# ── EPSS 參數測試 ─────────────────────────────────────────────────────────────
+
+MOCK_EPSS_LOW_RISK = {"epss_score": 0.03, "epss_percentile": 0.5, "epss_high_risk": False}
+MOCK_EPSS_HIGH_RISK = {"epss_score": 0.15, "epss_percentile": 0.95, "epss_high_risk": True}
+MOCK_EPSS_NO_DATA = {"epss_score": None, "epss_percentile": None, "epss_high_risk": False, "epss_note": "無資料"}
+
+
+class TestGenerateReportEpss:
+    @patch("kits.reporter.check_epss_fn", return_value=MOCK_EPSS_LOW_RISK)
+    @patch("kits.reporter.generate_recommendation", return_value=MOCK_RECOMMENDATION)
+    @patch("kits.reporter.analyze_cve", return_value=MOCK_ANALYSIS)
+    @patch("kits.reporter.fetch_cve", return_value=MOCK_CVE_DATA)
+    def test_generate_report_with_epss_low_risk(
+        self, mock_fetch, mock_analyze, mock_recommend, mock_epss
+    ):
+        """check_epss=True, score=0.03 → threat_intel 含 epss_score，無 epss_warning"""
+        result = generate_report(VALID_CVE_ID, check_epss=True)
+        assert "threat_intel" in result
+        assert "epss_score" in result["threat_intel"]
+        assert result["threat_intel"]["epss_score"] == pytest.approx(0.03)
+        assert "epss_warning" not in result
+
+    @patch("kits.reporter.check_epss_fn", return_value=MOCK_EPSS_HIGH_RISK)
+    @patch("kits.reporter.generate_recommendation", return_value=MOCK_RECOMMENDATION)
+    @patch("kits.reporter.analyze_cve", return_value=MOCK_ANALYSIS)
+    @patch("kits.reporter.fetch_cve", return_value=MOCK_CVE_DATA)
+    def test_generate_report_with_epss_high_risk(
+        self, mock_fetch, mock_analyze, mock_recommend, mock_epss
+    ):
+        """check_epss=True, score=0.15 → report 含 epss_warning"""
+        result = generate_report(VALID_CVE_ID, check_epss=True)
+        assert "epss_warning" in result
+        assert "0.1500" in result["epss_warning"] or "0.15" in result["epss_warning"]
+
+    @patch("kits.reporter.check_epss_fn", return_value=MOCK_EPSS_NO_DATA)
+    @patch("kits.reporter.generate_recommendation", return_value=MOCK_RECOMMENDATION)
+    @patch("kits.reporter.analyze_cve", return_value=MOCK_ANALYSIS)
+    @patch("kits.reporter.fetch_cve", return_value=MOCK_CVE_DATA)
+    def test_generate_report_epss_no_data(
+        self, mock_fetch, mock_analyze, mock_recommend, mock_epss
+    ):
+        """check_epss=True, 查無資料 → threat_intel["epss_note"] == "無資料"，無 epss_warning"""
+        result = generate_report(VALID_CVE_ID, check_epss=True)
+        assert "threat_intel" in result
+        assert result["threat_intel"].get("epss_note") == "無資料"
+        assert "epss_warning" not in result
+
+    @patch("kits.reporter.generate_recommendation", return_value=MOCK_RECOMMENDATION)
+    @patch("kits.reporter.analyze_cve", return_value=MOCK_ANALYSIS)
+    @patch("kits.reporter.fetch_cve", return_value=MOCK_CVE_DATA)
+    def test_generate_report_epss_false(
+        self, mock_fetch, mock_analyze, mock_recommend
+    ):
+        """check_epss=False → threat_intel 不含 epss 欄位"""
+        result = generate_report(VALID_CVE_ID, check_epss=False)
+        if "threat_intel" in result:
+            ti = result["threat_intel"]
+            assert "epss_score" not in ti
+            assert "epss_high_risk" not in ti
+
+
+# ── Markdown 報告測試 ──────────────────────────────────────────────────────────
+
+MOCK_REPORT_BASIC = {
+    "cve_id": "CVE-2021-44228",
+    "summary": "Apache Log4j2 JNDI remote code execution vulnerability.",
+    "impact": {
+        "impact_summary": "Allows unauthenticated remote code execution.",
+        "attack_vector": "Network",
+        "attack_conditions": "No authentication required.",
+        "severity_label": "Critical",
+        "exploitability": "Actively exploited in the wild.",
+        "affected_components": ["log4j-core 2.0-beta9 to 2.14.1"],
+    },
+    "recommendations": {
+        "patch_actions": ["升級 log4j-core 至 2.17.1 以上"],
+        "workarounds": ["設定 log4j2.formatMsgNoLookups=true"],
+        "language_specific": {"java": "更新 pom.xml"},
+        "priority": "Immediate",
+    },
+    "risk_rating": "Critical",
+    "generated_at": "2026-04-03T12:00:00",
+}
+
+MOCK_REPORT_WITH_THREAT_INTEL = {
+    **MOCK_REPORT_BASIC,
+    "threat_intel": {
+        "has_poc": True,
+        "poc_count": 12,
+        "in_the_wild": True,
+        "epss_score": 0.03,
+        "epss_percentile": 0.5,
+        "epss_high_risk": False,
+    },
+}
+
+MOCK_REPORT_WITH_EPSS_WARNING = {
+    **MOCK_REPORT_BASIC,
+    "threat_intel": {
+        "epss_score": 0.15,
+        "epss_percentile": 0.95,
+        "epss_high_risk": True,
+    },
+    "epss_warning": "高風險：EPSS 分數 0.1500，超過門檻 0.1，建議優先處理",
+}
+
+
+class TestReportToMarkdown:
+    def test_report_to_markdown_basic(self):
+        """標準報告 dict → 回傳字串含 '# CVE 漏洞分析報告'"""
+        result = report_to_markdown(MOCK_REPORT_BASIC)
+        assert isinstance(result, str)
+        assert "# CVE 漏洞分析報告" in result
+
+    def test_report_to_markdown_contains_cve_id(self):
+        """回傳字串應包含 CVE ID"""
+        result = report_to_markdown(MOCK_REPORT_BASIC)
+        assert "CVE-2021-44228" in result
+
+    def test_report_to_markdown_contains_risk_rating(self):
+        """回傳字串應包含風險評級"""
+        result = report_to_markdown(MOCK_REPORT_BASIC)
+        assert "Critical" in result
+
+    def test_report_to_markdown_with_threat_intel(self):
+        """含 threat_intel → 回傳字串含 '## 威脅情報'"""
+        result = report_to_markdown(MOCK_REPORT_WITH_THREAT_INTEL)
+        assert "## 威脅情報" in result
+
+    def test_report_to_markdown_without_threat_intel(self):
+        """無 threat_intel → 回傳字串不含 '## 威脅情報'"""
+        result = report_to_markdown(MOCK_REPORT_BASIC)
+        assert "## 威脅情報" not in result
+
+    def test_report_to_markdown_epss_warning(self):
+        """epss_warning 存在 → 回傳字串含 '⚠️'"""
+        result = report_to_markdown(MOCK_REPORT_WITH_EPSS_WARNING)
+        assert "⚠️" in result
+
+    def test_report_to_markdown_returns_string(self):
+        """回傳型別應為 str"""
+        result = report_to_markdown(MOCK_REPORT_BASIC)
+        assert isinstance(result, str)
+        assert len(result) > 0
+
+    def test_report_to_markdown_contains_summary(self):
+        """回傳字串應包含 summary 內容"""
+        result = report_to_markdown(MOCK_REPORT_BASIC)
+        assert "Apache Log4j2" in result
 
 
 # ── 整合測試（需要網路）──────────────────────────────────────────────────────
