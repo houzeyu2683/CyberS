@@ -10,7 +10,7 @@ jobs:
 
     steps:
       - name: Checkout repo
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Push to Hugging Face Space
         env:
@@ -19,11 +19,11 @@ jobs:
           git config --global user.email "houzeyu2683@gmail.com"
           git config --global user.name "houzeyu2683"
 
-          git clone https://huggingface.co/spaces/houzeyu2683/CyberS hf-space
+          git clone https://houzeyu2683:$HF_TOKEN@huggingface.co/spaces/houzeyu2683/CyberS hf-space
 
           rsync -av --exclude='.git' ./ hf-space/
 
           cd hf-space
           git add .
           git commit -m "update from github" || echo "no changes"
-          git push https://huggingface.co/spaces/houzeyu2683/CyberS
+          git push https://houzeyu2683:$HF_TOKEN@huggingface.co/spaces/houzeyu2683/CyberS
