@@ -6,14 +6,11 @@ generate_recommendation(cve_data: dict, analysis: dict) -> dict
 """
 
 import json
+import os
 import sys
-import yaml
 import google.generativeai  # noqa: ensure registered in sys.modules
 
-with open("key.yaml") as f:
-    _keys = yaml.safe_load(f)
-
-sys.modules["google.generativeai"].configure(api_key=_keys["GOOGLE_API_KEY"])
+sys.modules["google.generativeai"].configure(api_key=os.environ["GOOGLE_API_KEY"])
 
 SYSTEM_PROMPT = """\
 你是一位資安修復建議專家。請根據提供的 CVE 資訊與分析結果，以 JSON 格式回覆以下欄位：

@@ -1,4 +1,6 @@
 import re
+from dotenv import load_dotenv
+load_dotenv()
 import gradio as gr
 from kits.reporter import generate_report, report_to_markdown
 

@@ -6,14 +6,11 @@ analyze_cve(cve_data: dict) -> dict
 """
 
 import json
+import os
 import sys
-import yaml
 import google.generativeai  # noqa: ensure registered in sys.modules
 
-with open("key.yaml") as f:
-    _keys = yaml.safe_load(f)
-
-sys.modules["google.generativeai"].configure(api_key=_keys["GOOGLE_API_KEY"])
+sys.modules["google.generativeai"].configure(api_key=os.environ["GOOGLE_API_KEY"])
 
 REQUIRED_INPUT_KEYS = {"description", "cvss_score"}
 

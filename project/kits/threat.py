@@ -5,15 +5,10 @@ check_poc(cve_id: str) -> dict   GitHub Search API 偵測 PoC
 check_kev(cve_id: str) -> dict   CISA KEV 查詢已知在野利用
 """
 
+import os
 import requests
-import yaml
 
-try:
-    with open("key.yaml") as f:
-        _keys = yaml.safe_load(f)
-    GITHUB_TOKEN = _keys.get("GITHUB_TOKEN")
-except FileNotFoundError:
-    GITHUB_TOKEN = None
+GITHUB_TOKEN = os.environ.get("GITHUB_TOKEN")
 
 
 def check_poc(cve_id: str) -> dict:
