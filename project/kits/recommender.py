@@ -6,11 +6,8 @@ generate_recommendation(cve_data: dict, analysis: dict) -> dict
 """
 
 import json
-import os
-import sys
-import google.generativeai  # noqa: ensure registered in sys.modules
 
-sys.modules["google.generativeai"].configure(api_key=os.environ["GOOGLE_API_KEY"])
+from kits.llm import call_llm
 
 SYSTEM_PROMPT = """\
 你是一位資安修復建議專家。請根據提供的 CVE 資訊與分析結果，以 JSON 格式回覆以下欄位：
@@ -22,20 +19,6 @@ SYSTEM_PROMPT = """\
 只回覆 JSON，不要有其他說明文字。
 """
 
-
-def call_llm(prompt: str, system_prompt: str) -> dict:
-    """呼叫 Google Generative AI，回傳解析後的 dict。"""
-    import re
-    genai = sys.modules["google.generativeai"]
-    model = genai.GenerativeModel(
-        model_name="gemini-2.5-flash",
-        system_instruction=system_prompt,
-    )
-    response = model.generate_content(prompt)
-    text = response.text.strip()
-    text = re.sub(r"^```(?:json)?\s*", "", text)
-    text = re.sub(r"\s*```$", "", text)
-    return json.loads(text)
 
 
 def generate_recommendation(cve_data: dict, analysis: dict) -> dict:

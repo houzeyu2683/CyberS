@@ -59,4 +59,4 @@ with gr.Blocks() as demo:
     md_btn.click(fn=to_markdown, inputs=[out], outputs=[md_out, dl_btn])
 
 if __name__ == "__main__":
-    demo.launch()
+    demo.launch(server_name="0.0.0.0")
