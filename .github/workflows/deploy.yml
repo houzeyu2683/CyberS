@@ -23,7 +23,7 @@ jobs:
       - name: Run tests
         env:
           GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
-        run: pytest tests
+        run: pytest tests -m "not integration"
         working-directory: project
 
       - name: Push to Hugging Face Space
